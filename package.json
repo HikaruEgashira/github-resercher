@@ -1,0 +1,75 @@
+{
+  "name": "vscode-searchable",
+  "publisher": "hikaruegashira",
+  "displayName": "searchable in Copilot Chat",
+  "description": "Simple Copilot Chat Participant",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HikaruEgashira/vscode-copilot-searchable.git"
+  },
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "version": "1.0.0",
+  "extensionDependencies": [
+    "github.copilot-chat"
+  ],
+  "categories": [
+    "Chat",
+    "AI"
+  ],
+  "icon": "atom.png",
+  "activationEvents": [],
+  "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "searchable Configuration",
+      "properties": {
+        "searchable.systemPrompt": {
+          "type": "string",
+          "default": "",
+          "description": "System prompt for the searchable."
+        }
+      }
+    },
+    "chatParticipants": [
+      {
+        "id": "vscode-copilot.searchable",
+        "fullName": "searchable",
+        "name": "searchable",
+        "description": "Simple Copilot Chat Participant",
+        "isSticky": true,
+        "disambiguation": []
+      }
+    ]
+  },
+  "main": "./out/extension.js",
+  "scripts": {
+    "vscode:prepublish": "bun compile",
+    "publish": "bunx vsce publish",
+    "unpublish": "bunx vsce unpublish hikaruegashira.vscode-o1-agent",
+    "patch": "bunx vsce publish patch",
+    "minor": "bunx vsce publish minor",
+    "major": "bunx vsce publish major",
+    "compile": "tsc && vite build",
+    "watch": "vite build --watch",
+    "pretest": "bun compile && bun lint",
+    "lint": "bunx @biomejs/biome check --apply ./src",
+    "test": "vscode-test",
+    "update-proposed-api": "bunx vscode-dts dev",
+    "package": "bunx vsce package"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.3",
+    "@types/node": "^20.14.9",
+    "@types/vscode": "1.93.0",
+    "@vscode/prompt-tsx": "^0.2.11-alpha",
+    "typescript": "^5.5.3",
+    "vite": "^5.3.3"
+  },
+  "dependencies": {
+    "@octokit/rest": "^21.0.2",
+    "octokit": "^4.0.2",
+    "zod-to-json-schema": "^3.23.5"
+  }
+}
