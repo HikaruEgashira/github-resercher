@@ -19,98 +19,90 @@ export const chatHandler =
   (context: vscode.ExtensionContext): vscode.ChatRequestHandler =>
   async (request, _context, stream, token) => {
     try {
-      const [selectedModel] = await vscode.lm.selectChatModels(MODEL_SELECTOR);
+      const selectedModel = await selectModel();
       if (selectedModel) {
-        // Create system message with tool descriptions
-        const toolDescriptions = tools
-          .map(
-            (tool) =>
-              `${tool.name}: ${tool.description} (${JSON.stringify(zodToJsonSchema(tool.schema), null, 2).replaceAll("\n", " ")})`,
-          )
-          .join("\n");
-        const systemMessage = `You have access to the following tools:\n${toolDescriptions}\n\nTo use a tool, respond with a message that includes the tool name and input in a JSON format like this: {"tool": "tool_name", "input": {"param1": "value1", "param2": "value2"}}`;
+        const systemMessage = createSystemMessage();
+        const modelResponse = await getModelResponse(selectedModel, systemMessage, request.prompt, token);
+        const parsedResponse = await parseModelResponse(modelResponse);
 
-        // Get response from the model
-        const modelResponse = await selectedModel.sendRequest(
-          [
-            { name: "system", role: vscode.LanguageModelChatMessageRole.Assistant, content: systemMessage },
-            { name: "user", role: vscode.LanguageModelChatMessageRole.User, content: request.prompt },
-          ],
-          {},
-          token,
-        );
+        if (isValidToolInvocation(parsedResponse)) {
+          const selectedTool = tools.find((tool) => tool.name === parsedResponse.tool);
+          if (selectedTool) {
+            try {
+              const validatedInput = selectedTool.schema.parse(parsedResponse.input);
+              const result = await selectedTool.action(validatedInput, context);
 
-        try {
-          // Try to parse the response as a tool invocation
-          let responseText = "";
-          for await (const chunk of modelResponse.text) {
-            responseText += chunk;
-          }
-          const parsedResponse = JSON.parse(responseText);
-          if (
-            parsedResponse &&
-            typeof parsedResponse === "object" &&
-            "tool" in parsedResponse &&
-            "input" in parsedResponse
-          ) {
-            const selectedTool = tools.find((t) => t.name === parsedResponse.tool);
-            if (selectedTool) {
-              try {
-                // Validate input against the specific tool's schema
-                const validatedInput = selectedTool.schema.parse(parsedResponse.input);
-                // Execute tool action with validated input
-                stream.progress(
-                  `Executing tool '${parsedResponse.tool}' with input: ${JSON.stringify(validatedInput, null, 2)}`,
-                );
-                const result = await selectedTool.action(validatedInput, context);
-
-                stream.progress(`Result from tool: ${result}`);
-                const { messages } = await renderPrompt(
-                  Prompt,
-                  { userQuery: request.prompt, result },
-                  { modelMaxPromptTokens: selectedModel.maxInputTokens },
-                  selectedModel,
-                );
-
-                const chatResponse = await selectedModel.sendRequest(messages, {}, token);
-                for await (const fragment of chatResponse.text) {
-                  stream.markdown(fragment);
-                }
-              } catch (validationError) {
-                // Enhanced error message for validation errors
-                if (validationError instanceof Error) {
-                  const errorDetails = JSON.stringify(validationError, null, 2);
-                  stream.markdown(`Invalid input for tool '${parsedResponse.tool}': ${errorDetails}`);
-                } else {
-                  stream.markdown(
-                    `Invalid input for tool '${parsedResponse.tool}': ${JSON.stringify(validationError, null, 2)}`,
-                  );
-                }
-              }
-            } else {
-              stream.markdown(
-                `Tool '${parsedResponse.tool}' not found. Available tools: ${tools.map((t) => t.name).join(", ")}`,
+              stream.progress(`Result from tool: ${result}`);
+              const { messages } = await renderPrompt(
+                Prompt,
+                { userQuery: request.prompt, result },
+                { modelMaxPromptTokens: selectedModel.maxInputTokens },
+                selectedModel,
               );
+
+              stream.progress(`Sending messages to model: ${JSON.stringify(messages)}`);
+              const chatResponse = await selectedModel.sendRequest(messages, {}, token);
+              for await (const fragment of chatResponse.text) {
+                stream.markdown(fragment);
+              }
+            } catch (validationError) {
+              stream.markdown(`Error: ${validationError.message}`);
             }
-          } else {
-            // If not a tool invocation, stream the response directly
-            for await (const chunk of modelResponse.text) {
-              stream.markdown(chunk);
-            }
-          }
-        } catch {
-          // If not JSON or invalid format, stream the response directly
-          for await (const chunk of modelResponse.text) {
-            stream.markdown(chunk);
           }
         }
       }
-    } catch (err) {
-      handleChatError(err, stream);
+    } catch (error) {
+      handleChatError(error, stream);
     }
-
-    return { metadata: { command: "" } };
   };
+
+async function selectModel() {
+  const [selectedModel] = await vscode.lm.selectChatModels(MODEL_SELECTOR);
+  return selectedModel;
+}
+
+function createSystemMessage() {
+  const toolDescriptions = tools
+    .map(
+      (tool) =>
+        `${tool.name}: ${tool.description} (${JSON.stringify(zodToJsonSchema(tool.schema), null, 2).replaceAll("\n", " ")})`,
+    )
+    .join("\n");
+  return `You have access to the following tools:\n${toolDescriptions}\n\nTo use a tool, respond with a message that includes the tool name and input in a JSON format like this: {"tool": "tool_name", "input": {"param1": "value1", "param2": "value2"}}`;
+}
+
+async function getModelResponse(
+  selectedModel: vscode.LanguageModelChat,
+  systemMessage: string,
+  userPrompt: string,
+  token: vscode.CancellationToken,
+) {
+  return await selectedModel.sendRequest(
+    [
+      { name: "system", role: vscode.LanguageModelChatMessageRole.Assistant, content: systemMessage },
+      { name: "user", role: vscode.LanguageModelChatMessageRole.User, content: userPrompt },
+    ],
+    {},
+    token,
+  );
+}
+
+async function parseModelResponse(modelResponse: { text: AsyncIterable<string> }) {
+  let responseText = "";
+  for await (const chunk of modelResponse.text) {
+    responseText += chunk;
+  }
+  return JSON.parse(responseText);
+}
+
+interface ParsedResponse {
+  tool: string;
+  input: unknown;
+}
+
+function isValidToolInvocation(parsedResponse: ParsedResponse) {
+  return parsedResponse && typeof parsedResponse === "object" && "tool" in parsedResponse && "input" in parsedResponse;
+}
 
 function handleChatError(err: unknown, stream: vscode.ChatResponseStream): void {
   if (err instanceof vscode.LanguageModelError) {
