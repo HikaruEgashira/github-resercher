@@ -19,7 +19,7 @@ export const chatHandler =
   (context: vscode.ExtensionContext): vscode.ChatRequestHandler =>
   async (request, _context, stream, token) => {
     try {
-      const selectedModel = await selectModel();
+      const [selectedModel] = await vscode.lm.selectChatModels(MODEL_SELECTOR);
       if (selectedModel) {
         const systemMessage = createSystemMessage();
         const modelResponse = await getModelResponse(selectedModel, systemMessage, request.prompt, token);
@@ -56,11 +56,6 @@ export const chatHandler =
     }
   };
 
-async function selectModel() {
-  const [selectedModel] = await vscode.lm.selectChatModels(MODEL_SELECTOR);
-  return selectedModel;
-}
-
 function createSystemMessage() {
   const toolDescriptions = tools
     .map(
@@ -95,12 +90,7 @@ async function parseModelResponse(modelResponse: { text: AsyncIterable<string> }
   return JSON.parse(responseText);
 }
 
-interface ParsedResponse {
-  tool: string;
-  input: unknown;
-}
-
-function isValidToolInvocation(parsedResponse: ParsedResponse) {
+function isValidToolInvocation(parsedResponse: unknown) {
   return parsedResponse && typeof parsedResponse === "object" && "tool" in parsedResponse && "input" in parsedResponse;
 }
 
